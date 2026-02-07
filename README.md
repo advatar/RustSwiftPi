@@ -43,6 +43,8 @@ Build the universal (arm64 + x86_64) Rust static library and copy it into the Sw
 PiSwift/Scripts/build-rust-macos-universal.sh
 ```
 
+This generates `PiSwift/Sources/PiRustFFI/lib/libpi_swift_ffi.a` (the `lib/` directory is generated and gitignored).
+
 Then build/test the Swift package:
 
 ```bash

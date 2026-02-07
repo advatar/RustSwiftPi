@@ -11,6 +11,8 @@ cd /Volumes/XCodeX/pi
 PiSwift/Scripts/build-rust-macos-universal.sh
 ```
 
+This generates `PiSwift/Sources/PiRustFFI/lib/libpi_swift_ffi.a` (the `lib/` directory is generated and gitignored).
+
 2. Build/test the Swift package:
 
 ```bash
@@ -35,4 +37,3 @@ print(reply)
 Notes:
 - If `apiKey` is nil/empty, the Rust side will fall back to `OPENAI_API_KEY` from the environment.
 - The Rust FFI will attempt to load a `.env` file once (searching current directory and parents).
-
