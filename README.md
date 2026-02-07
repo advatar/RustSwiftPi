@@ -8,16 +8,35 @@ This repository is intentionally **library-first**:
 - `adapters/*`: I/O implementations (providers, filesystem tools, shell, UIs, etc.)
 - `app/`: composition root(s)
 
-## What is implemented (Drop 1)
+## What is implemented
 
-✅ Agent runtime with tool loop (`core/`)  
-✅ OpenAI chat-completions provider adapter (`adapters/adapter_openai/`)  
-✅ Coding tools: `read`, `write`, `edit` (`adapters/adapter_fs/`)  
-✅ `bash` tool (`adapters/adapter_shell/`)  
-✅ CLI composition root (`app/`)  
-✅ Swift Package wrapper (`PiSwift/`)  
+✅ Drop 1: agent runtime + OpenAI adapter + core coding tools + minimal CLI + Swift Package wrapper  
+✅ Drop 2: pi-ai primitives: model catalog, provider registry, cost/token accounting types, streaming surface (OpenAI chat-completions SSE)
 
 🚧 Stubs (compile, but not feature-complete): slack (`adapter_slack`), web-ui (`adapter_web_ui`), pods (`adapter_pods`), proxy (`adapter_proxy`), tui library (`adapter_tui`).
+
+### pi-ai style usage (library)
+
+```rust
+use pi_contracts::{ChatMessage, Context};
+use pi_core::{AiClient, ModelCatalog, ProviderHub};
+use pi_adapter_openai::OpenAiChatProvider;
+use std::sync::Arc;
+
+# async fn demo() -> Result<(), pi_contracts::PiError> {
+let models = ModelCatalog::builtin();
+let mut providers = ProviderHub::new();
+providers.insert(pi_contracts::NonEmptyString::new("openai")?, Arc::new(OpenAiChatProvider::from_env()?) );
+let ai = AiClient::new(models, providers);
+
+let model = ai.model("openai", "gpt-4o-mini")?;
+let ctx = Context { messages: vec![ChatMessage::user("Hello")] };
+
+let resp = ai.complete(&model, &ctx, vec![], None, None).await?;
+println!("{resp:?}");
+# Ok(())
+# }
+```
 
 ## Run (macOS)
 
