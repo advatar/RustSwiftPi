@@ -1,0 +1,19 @@
+[package]
+name = "pi_app"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+pi_contracts = { path = "../contracts" }
+pi_core = { path = "../core" }
+pi_adapter_openai = { path = "../adapters/adapter_openai" }
+pi_adapter_fs = { path = "../adapters/adapter_fs" }
+pi_adapter_shell = { path = "../adapters/adapter_shell" }
+clap.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+dotenvy.workspace = true
+uuid.workspace = true

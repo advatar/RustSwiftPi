@@ -1,0 +1,18 @@
+[package]
+name = "pi_adapter_openai"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+pi_core = { path = "../../core" }
+pi_contracts = { path = "../../contracts" }
+async-trait.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
