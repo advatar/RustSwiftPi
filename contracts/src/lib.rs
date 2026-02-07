@@ -80,11 +80,164 @@ impl fmt::Display for NonEmptyString {
 /// A model identifier (e.g. `gpt-4.1-mini`).
 pub type ModelId = NonEmptyString;
 
+/// Provider identifier (e.g. `openai`, `anthropic`, `ollama`).
+pub type ProviderId = NonEmptyString;
+
 /// Tool name.
 pub type ToolName = NonEmptyString;
 
 /// Tool call id.
 pub type ToolCallId = NonEmptyString;
+
+/// Supported provider API families.
+///
+/// pi-ai's design centers around "the four APIs":
+/// - OpenAI Chat Completions
+/// - OpenAI Responses
+/// - Anthropic Messages
+/// - Google Generative AI
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ApiKind {
+    OpenAiCompletions,
+    OpenAiResponses,
+    AnthropicMessages,
+    GoogleGenerativeAi,
+}
+
+/// Input modalities a model accepts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum InputModality {
+    Text,
+    Image,
+    Audio,
+}
+
+/// Per-1M-token costs in USD.
+///
+/// All fields are expressed as USD / 1,000,000 tokens.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct TokenCost {
+    pub input: f64,
+    pub output: f64,
+    #[serde(default)]
+    pub cache_read: f64,
+    #[serde(default)]
+    pub cache_write: f64,
+}
+
+impl TokenCost {
+    pub const fn free() -> Self {
+        Self {
+            input: 0.0,
+            output: 0.0,
+            cache_read: 0.0,
+            cache_write: 0.0,
+        }
+    }
+
+    /// Best-effort estimate of USD cost for the given usage.
+    pub fn estimate_usd(&self, usage: &TokenUsage) -> CostBreakdown {
+        let per_m = 1_000_000.0;
+        let input = (usage.prompt_tokens as f64 / per_m) * self.input;
+        let output = (usage.completion_tokens as f64 / per_m) * self.output;
+        let cache_read = (usage.cache_read_tokens as f64 / per_m) * self.cache_read;
+        let cache_write = (usage.cache_write_tokens as f64 / per_m) * self.cache_write;
+        CostBreakdown {
+            input,
+            output,
+            cache_read,
+            cache_write,
+            total: input + output + cache_read + cache_write,
+            currency: Currency::Usd,
+        }
+    }
+}
+
+/// Currency code for cost tracking.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum Currency {
+    Usd,
+}
+
+/// Cost breakdown for a request.
+///
+/// This is a best-effort estimate; providers differ wildly in token accounting and cache reporting.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CostBreakdown {
+    pub input: f64,
+    pub output: f64,
+    pub cache_read: f64,
+    pub cache_write: f64,
+    pub total: f64,
+    pub currency: Currency,
+}
+
+/// Standardized model descriptor.
+///
+/// This mirrors the rough shape used in `@mariozechner/pi-ai`: a stable identifier, a provider,
+/// an API family, capability flags, and cost metadata.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Model {
+    pub id: ModelId,
+    pub name: String,
+    pub api: ApiKind,
+    pub provider: ProviderId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    #[serde(default)]
+    pub reasoning: bool,
+    #[serde(default)]
+    pub input: Vec<InputModality>,
+    #[serde(default)]
+    pub cost: TokenCost,
+    #[serde(default)]
+    pub context_window: u32,
+    #[serde(default)]
+    pub max_tokens: u32,
+}
+
+impl Model {
+    /// Creates a new model descriptor.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        provider: ProviderId,
+        id: ModelId,
+        api: ApiKind,
+        name: impl Into<String>,
+        cost: TokenCost,
+        context_window: u32,
+        max_tokens: u32,
+        input: Vec<InputModality>,
+        reasoning: bool,
+        base_url: Option<String>,
+    ) -> Self {
+        Self {
+            id,
+            name: name.into(),
+            api,
+            provider,
+            base_url,
+            reasoning,
+            input,
+            cost,
+            context_window,
+            max_tokens,
+        }
+    }
+}
+
+/// A portable, serializable conversation context.
+///
+/// In Rust we already model messages as an ADT (`ChatMessage`), so a `Context` is essentially a
+/// vector of messages. Keeping it as a struct makes room for future knobs while preserving
+/// backward compatibility.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
+pub struct Context {
+    pub messages: Vec<ChatMessage>,
+}
 
 /// Message role.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -138,7 +291,10 @@ pub enum ChatMessage {
         tool_calls: Vec<ToolCall>,
     },
     /// Tool result message.
-    Tool { tool_call_id: ToolCallId, content: String },
+    Tool {
+        tool_call_id: ToolCallId,
+        content: String,
+    },
 }
 
 impl ChatMessage {
@@ -189,6 +345,22 @@ pub struct TokenUsage {
     pub prompt_tokens: u64,
     pub completion_tokens: u64,
     pub total_tokens: u64,
+    #[serde(default)]
+    pub cache_read_tokens: u64,
+    #[serde(default)]
+    pub cache_write_tokens: u64,
+}
+
+impl TokenUsage {
+    pub const fn new(prompt_tokens: u64, completion_tokens: u64, total_tokens: u64) -> Self {
+        Self {
+            prompt_tokens,
+            completion_tokens,
+            total_tokens,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+        }
+    }
 }
 
 /// Chat request passed to a provider.
@@ -210,6 +382,45 @@ pub struct ChatResponse {
     pub assistant: ChatMessage,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<TokenUsage>,
+    /// Optional best-effort cost estimate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost: Option<CostBreakdown>,
+}
+
+/// Streaming error category (normalized).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StreamErrorReason {
+    Aborted,
+    Provider,
+    Decode,
+}
+
+/// Normalized streaming events.
+///
+/// The intention is "UI-friendly deltas" + a final `Done` event.
+/// Providers may omit usage/cost information in streams; consumers should treat these as best-effort.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ChatStreamEvent {
+    TextDelta {
+        delta: String,
+    },
+    ToolCallDelta {
+        id: ToolCallId,
+        name: ToolName,
+        arguments_delta: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parsed_arguments: Option<serde_json::Value>,
+    },
+    Usage {
+        usage: TokenUsage,
+    },
+    Done,
+    Error {
+        reason: StreamErrorReason,
+        message: String,
+    },
 }
 
 /// A session identifier.
@@ -244,5 +455,31 @@ impl LineRange {
             return Err(PiError::Invalid("line range start > end".into()));
         }
         Ok(Self { start, end })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn token_cost_estimate_is_additive() {
+        let c = TokenCost {
+            input: 2.0,       // $2 / 1M input
+            output: 10.0,     // $10 / 1M output
+            cache_read: 1.0,  // $1 / 1M
+            cache_write: 5.0, // $5 / 1M
+        };
+        let usage = TokenUsage {
+            prompt_tokens: 500_000,
+            completion_tokens: 100_000,
+            total_tokens: 600_000,
+            cache_read_tokens: 200_000,
+            cache_write_tokens: 50_000,
+        };
+        let cost = c.estimate_usd(&usage);
+        // 0.5*2 + 0.1*10 + 0.2*1 + 0.05*5 = 1 + 1 + 0.2 + 0.25 = 2.45
+        assert!((cost.total - 2.45).abs() < 1e-9);
+        assert_eq!(cost.currency, Currency::Usd);
     }
 }
